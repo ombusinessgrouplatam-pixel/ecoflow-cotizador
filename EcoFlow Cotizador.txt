@@ -1,0 +1,515 @@
+# EcoFlow Cotizador — Estructura del Proyecto
+
+Crea esta estructura de carpetas en tu computador:
+
+```
+ecoflow-cotizador/
+├── package.json
+├── next.config.js
+├── tailwind.config.js
+├── postcss.config.js
+├── .env.local
+└── src/
+    └── app/
+        ├── layout.js
+        ├── page.js
+        ├── globals.css
+        └── api/
+            └── sheet/
+                └── route.js
+```
+
+---
+
+## 📄 package.json
+
+```json
+{
+  "name": "ecoflow-cotizador",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3"
+  }
+}
+```
+
+---
+
+## 📄 next.config.js
+
+```js
+/** @type {import('next').NextConfig} */
+const nextConfig = {};
+module.exports = nextConfig;
+```
+
+---
+
+## 📄 tailwind.config.js
+
+```js
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ["./src/**/*.{js,jsx,ts,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+};
+```
+
+---
+
+## 📄 postcss.config.js
+
+```js
+module.exports = {
+  plugins: { tailwindcss: {}, autoprefixer: {} },
+};
+```
+
+---
+
+## 📄 .env.local
+(Este archivo NO se sube a GitHub — guarda tus claves aquí)
+
+```
+ANTHROPIC_API_KEY=sk-ant-TUCLAVEAQUI
+NEXT_PUBLIC_SHEET_ID=1mMzPsJ2k72fQsXBzgVuUiH0IdsDpjPyeH4OYbqMWPCU
+```
+
+---
+
+## 📄 src/app/globals.css
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0a; color: white; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.fade-in { animation: fadeIn .4s ease; }
+.spinner {
+  width: 32px; height: 32px;
+  border: 3px solid #222;
+  border-top: 3px solid white;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+```
+
+---
+
+## 📄 src/app/layout.js
+
+```jsx
+import "./globals.css";
+
+export const metadata = {
+  title: "Cotizador EcoFlow",
+  description: "Encuentra tu solución de energía ideal",
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="es">
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+---
+
+## 📄 src/app/api/sheet/route.js
+(Lee el Google Sheet desde el servidor — seguro)
+
+```js
+export async function GET() {
+  const sheetId = process.env.NEXT_PUBLIC_SHEET_ID;
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+
+  try {
+    const res = await fetch(url, { next: { revalidate: 60 } });
+    if (!res.ok) throw new Error("Sheet error");
+    const text = await res.text();
+    return Response.json({ csv: text });
+  } catch {
+    return Response.json({ csv: null }, { status: 500 });
+  }
+}
+```
+
+---
+
+## 📄 src/app/api/ocr/route.js
+(Llama a Claude para leer el recibo — la API key queda en el servidor)
+
+```js
+export async function POST(req) {
+  const { base64, mediaType } = await req.json();
+  const isPDF = mediaType === "application/pdf";
+
+  const block = isPDF
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
+    : { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } };
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 256,
+      messages: [{
+        role: "user",
+        content: [
+          block,
+          { type: "text", text: "Analiza este recibo de energía eléctrica. Extrae la potencia demandada en watts (W) o kW. Si es kW multiplica por 1000. Responde SOLO con un número entero. Si no puedes determinarlo responde: 0" }
+        ]
+      }]
+    })
+  });
+
+  const data = await res.json();
+  const watts = parseInt(data.content?.[0]?.text?.trim() || "0", 10) || 0;
+  return Response.json({ watts });
+}
+```
+
+---
+
+## 📄 src/app/page.js
+(Componente principal — pega TODO este código)
+
+```jsx
+"use client";
+import { useState, useRef, useCallback } from "react";
+
+const DEMO_DATA = [
+  { ref:"EcoFlow RIVER 2", cap:256, pot:300, panel:"110w", qty:1, precioPanel:460000, precioSinIVA:1450000, precioConIVA:1725500 },
+  { ref:"EcoFlow RIVER 2 Max", cap:512, pot:500, panel:"220w", qty:1, precioPanel:800000, precioSinIVA:2190000, precioConIVA:2606100 },
+  { ref:"EcoFlow RIVER 2 Pro", cap:768, pot:800, panel:"220w", qty:2, precioPanel:800000, precioSinIVA:3250000, precioConIVA:3867500 },
+  { ref:"EcoFlow DELTA Mini", cap:882, pot:1400, panel:"400w", qty:2, precioPanel:2000000, precioSinIVA:3980000, precioConIVA:4736200 },
+  { ref:"EcoFlow DELTA 2", cap:1024, pot:1800, panel:"400w", qty:1, precioPanel:2000000, precioSinIVA:4890000, precioConIVA:5819100 },
+  { ref:"EcoFlow DELTA 2 Max", cap:2048, pot:2400, panel:"400w", qty:1, precioPanel:2000000, precioSinIVA:7350000, precioConIVA:8746500 },
+  { ref:"EcoFlow DELTA Pro", cap:3600, pot:3600, panel:"400w", qty:4, precioPanel:2000000, precioSinIVA:10980000, precioConIVA:13066200 },
+  { ref:"EcoFlow PowerOcean 5kW", cap:5000, pot:5000, panel:"400w", qty:8, precioPanel:2000000, precioSinIVA:22500000, precioConIVA:26775000 },
+  { ref:"EcoFlow DELTA Pro Ultra", cap:6144, pot:7200, panel:"400w", qty:6, precioPanel:2000000, precioSinIVA:19750000, precioConIVA:23502500 },
+];
+
+const fmt = (n) =>
+  new Intl.NumberFormat("es-CO", { style:"currency", currency:"COP", maximumFractionDigits:0 }).format(Number(n));
+
+function findBest(data, w) {
+  const sorted = [...data].sort((a, b) => a.pot - b.pot);
+  return sorted.find(eq => eq.pot >= w) || sorted[sorted.length - 1];
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split("\n").filter(l => l.trim());
+  const hi = lines.findIndex(l => l.toLowerCase().includes("referencia"));
+  if (hi === -1) return null;
+  const headers = lines[hi].split(",").map(h => h.replace(/"/g,"").trim());
+  const rows = lines.slice(hi+1).map(line => {
+    const vals = []; let cur = "", inQ = false;
+    for (const c of line) {
+      if (c==='"') inQ=!inQ;
+      else if (c===',' && !inQ) { vals.push(cur.trim()); cur=""; }
+      else cur+=c;
+    }
+    vals.push(cur.trim());
+    const obj = {};
+    headers.forEach((h,i) => { obj[h] = (vals[i]||"").replace(/[$,]/g,"").trim(); });
+    return obj;
+  }).filter(r => r[headers[0]] && r[headers[0]].length > 2);
+
+  return rows.map(r => ({
+    ref: r["Referencia equipo"],
+    cap: Number(r["Capacidad (Wh)"]) || 0,
+    pot: Number(r["Potencia (W)"]) || 0,
+    panel: r["Panel recomendado"] || "-",
+    qty: Number(r["Cantidad paneles recomendados"]) || 0,
+    precioPanel: Number(r["Precio Panel (COP) excepto IVA"]) || 0,
+    precioSinIVA: Number(r["Precio Equipo EcoFlow antes de IVA"]) || 0,
+    precioConIVA: Number(r["Precio Equipo EcoFlow incluido IVA"]) || 0,
+  })).filter(r => r.ref && r.pot > 0);
+}
+
+function Logo() {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <svg width="32" height="32" viewBox="0 0 32 32">
+        <rect width="32" height="32" rx="6" fill="white"/>
+        <polygon points="16,4 28,16 16,28 4,16" fill="#111"/>
+        <polygon points="16,10 22,16 16,22 10,16" fill="white"/>
+      </svg>
+      <span style={{color:"white",fontWeight:800,fontSize:17,letterSpacing:0.3}}>EcoFlow</span>
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div style={{display:"flex",justifyContent:"center",padding:"48px 0"}}>
+      <div className="spinner"/>
+    </div>
+  );
+}
+
+function Result({ eq }) {
+  const [tab, setTab] = useState("equipo");
+  const iva = eq.precioConIVA - eq.precioSinIVA;
+  const totalPaneles = eq.qty * eq.precioPanel;
+  const grandTotal = eq.precioConIVA + totalPaneles;
+
+  return (
+    <div className="fade-in">
+      <div style={{background:"#111",border:"1px solid #222",borderRadius:14,padding:"22px 24px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        <div>
+          <p style={{color:"#555",fontSize:10,letterSpacing:3,textTransform:"uppercase",marginBottom:5}}>Equipo Recomendado</p>
+          <h2 style={{color:"white",fontSize:22,fontWeight:700,margin:0}}>{eq.ref}</h2>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          {[["Capacidad",eq.cap+" Wh"],["Potencia",eq.pot+" W"]].map(([k,v])=>(
+            <div key={k} style={{background:"#1a1a1a",borderRadius:10,padding:"10px 16px",textAlign:"center"}}>
+              <p style={{color:"#555",fontSize:9,letterSpacing:2,textTransform:"uppercase",margin:0}}>{k}</p>
+              <p style={{color:"white",fontSize:15,fontWeight:600,margin:"4px 0 0"}}>{v}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:6,marginBottom:12,background:"#111",border:"1px solid #1e1e1e",borderRadius:12,padding:5}}>
+        {[["equipo","🔋 Equipo"],["paneles","🌞 Paneles"]].map(([val,label])=>(
+          <button key={val} onClick={()=>setTab(val)} style={{
+            flex:1,padding:"10px 0",borderRadius:8,border:"none",cursor:"pointer",
+            fontWeight:600,fontSize:13,transition:"all .2s",
+            background:tab===val?"white":"transparent",color:tab===val?"#000":"#555"
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {tab==="equipo" && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:12}}>
+          {[
+            ["Referencia Equipo",eq.ref,"white"],
+            ["Capacidad",eq.cap+" Wh","white"],
+            ["Potencia",eq.pot+" W","white"],
+            ["Precio antes de IVA",fmt(eq.precioSinIVA),"#a0c4ff"],
+            ["IVA (19%)",fmt(iva),"#ffd6a5"],
+            ["Precio con IVA",fmt(eq.precioConIVA),"#caffbf"],
+          ].map(([label,value,color])=>(
+            <div key={label} style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:12,padding:"14px 16px"}}>
+              <p style={{color:"#555",fontSize:9,letterSpacing:2,textTransform:"uppercase",margin:"0 0 5px"}}>{label}</p>
+              <p style={{color,fontSize:14,fontWeight:600,margin:0}}>{value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="paneles" && (
+        <div style={{marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:10}}>
+            {[
+              ["Panel Recomendado",eq.panel,"white"],
+              ["Cantidad de Paneles",eq.qty+" unidades","white"],
+              ["Precio por Panel (sin IVA)",fmt(eq.precioPanel),"#a0c4ff"],
+              ["Costo Total Paneles",fmt(totalPaneles),"#caffbf"],
+            ].map(([label,value,color])=>(
+              <div key={label} style={{background:"#111",border:"1px solid #1e1e1e",borderRadius:12,padding:"14px 16px"}}>
+                <p style={{color:"#555",fontSize:9,letterSpacing:2,textTransform:"uppercase",margin:"0 0 5px"}}>{label}</p>
+                <p style={{color,fontSize:14,fontWeight:600,margin:0}}>{value}</p>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#0d180d",border:"1px solid #1a3a1a",borderRadius:10,padding:"12px 16px"}}>
+            <p style={{color:"#4a8a4a",fontSize:11,margin:0}}>✅ Los paneles solares <strong>no incluyen IVA</strong></p>
+          </div>
+        </div>
+      )}
+
+      <div style={{background:"white",borderRadius:14,padding:"20px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        <div>
+          <p style={{color:"#888",fontSize:9,letterSpacing:2,textTransform:"uppercase",margin:"0 0 4px"}}>Total Equipo (con IVA) + Paneles (sin IVA)</p>
+          <p style={{color:"#000",fontSize:28,fontWeight:700,letterSpacing:-1,margin:0}}>{fmt(grandTotal)}</p>
+          <p style={{color:"#aaa",fontSize:11,margin:"3px 0 0"}}>{fmt(eq.precioConIVA)} equipo + {fmt(totalPaneles)} paneles</p>
+        </div>
+        <button style={{background:"#000",color:"white",border:"none",borderRadius:10,padding:"12px 24px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          Solicitar Cotización →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const [watts, setWatts] = useState("");
+  const [mode, setMode] = useState("manual");
+  const [loading, setLoading] = useState(false);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [sheetErr, setSheetErr] = useState(false);
+  const [ocrInfo, setOcrInfo] = useState(null);
+  const [fileName, setFileName] = useState("");
+  const fileRef = useRef();
+
+  const getData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sheet");
+      const { csv } = await res.json();
+      if (!csv) throw new Error();
+      const parsed = parseCSV(csv);
+      if (!parsed || !parsed.length) throw new Error();
+      return parsed;
+    } catch {
+      setSheetErr(true);
+      return DEMO_DATA;
+    }
+  }, []);
+
+  const search = async (w) => {
+    const val = parseInt(w ?? watts, 10);
+    if (!val || val <= 0) return;
+    setLoading(true); setResult(null);
+    const data = await getData();
+    setResult(findBest(data, val));
+    setLoading(false);
+  };
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setFileName(file.name); setOcrLoading(true); setOcrInfo(null);
+    try {
+      const b64 = await new Promise((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res(r.result.split(",")[1]);
+        r.onerror=rej;
+        r.readAsDataURL(file);
+      });
+      const res = await fetch("/api/ocr", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({base64:b64,mediaType:file.type})
+      });
+      const { watts: w } = await res.json();
+      setOcrInfo(w); setWatts(String(w));
+      if (w>0) await search(w);
+    } catch { setOcrInfo(0); }
+    setOcrLoading(false);
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:"#0a0a0a",color:"white",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",paddingBottom:60}}>
+      <header style={{borderBottom:"1px solid #181818",padding:"15px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,background:"rgba(10,10,10,.95)",backdropFilter:"blur(12px)",zIndex:100}}>
+        <Logo/>
+        <span style={{color:"#333",fontSize:10,letterSpacing:3,textTransform:"uppercase"}}>Cotizador Inteligente</span>
+      </header>
+
+      <div style={{maxWidth:720,margin:"0 auto",padding:"40px 16px 0"}}>
+        <div style={{textAlign:"center",marginBottom:40}}>
+          <p style={{color:"#444",fontSize:10,letterSpacing:4,textTransform:"uppercase",marginBottom:10}}>Powered by EcoFlow</p>
+          <h1 style={{fontSize:"clamp(24px,5vw,38px)",fontWeight:700,letterSpacing:-1,lineHeight:1.1,marginBottom:12}}>
+            Encuentra tu solución<br/><span style={{color:"#555"}}>de energía ideal</span>
+          </h1>
+          <p style={{color:"#555",fontSize:14,maxWidth:400,margin:"0 auto"}}>Ingresa tu potencia requerida o sube tu recibo de luz.</p>
+        </div>
+
+        <div style={{display:"flex",gap:6,marginBottom:16,background:"#111",border:"1px solid #1e1e1e",borderRadius:12,padding:5}}>
+          {[["manual","⚡ Ingresar Watts"],["ocr","📄 Subir Recibo"]].map(([val,label])=>(
+            <button key={val} onClick={()=>setMode(val)} style={{
+              flex:1,padding:"10px 0",borderRadius:8,border:"none",cursor:"pointer",
+              fontWeight:600,fontSize:13,transition:"all .2s",
+              background:mode===val?"white":"transparent",color:mode===val?"#000":"#555"
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {mode==="manual" && (
+          <div style={{marginBottom:24}}>
+            <div style={{display:"flex",gap:10}}>
+              <div style={{flex:1,position:"relative"}}>
+                <input type="number" value={watts} onChange={e=>setWatts(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&search()}
+                  placeholder="Ej: 1500"
+                  style={{width:"100%",boxSizing:"border-box",background:"#111",border:"1px solid #2a2a2a",borderRadius:12,padding:"14px 44px 14px 16px",color:"white",fontSize:16,fontWeight:500,outline:"none"}}
+                />
+                <span style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",color:"#444",fontSize:12,pointerEvents:"none"}}>W</span>
+              </div>
+              <button onClick={()=>search()} disabled={!watts||loading} style={{
+                background:watts&&!loading?"white":"#181818",color:watts&&!loading?"#000":"#444",
+                border:"none",borderRadius:12,padding:"0 24px",fontSize:13,fontWeight:700,
+                cursor:watts?"pointer":"default",transition:"all .2s",minWidth:95
+              }}>{loading?"...":"Buscar →"}</button>
+            </div>
+          </div>
+        )}
+
+        {mode==="ocr" && (
+          <div style={{marginBottom:24}}>
+            <div onClick={()=>fileRef.current?.click()}
+              onDragOver={e=>e.preventDefault()}
+              onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0]);}}
+              style={{border:"2px dashed #2a2a2a",borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer",background:"#0e0e0e"}}>
+              <div style={{fontSize:30,marginBottom:8}}>📄</div>
+              <p style={{color:"white",fontWeight:600,fontSize:14,margin:"0 0 4px"}}>{fileName||"Arrastra o selecciona tu recibo"}</p>
+              <p style={{color:"#555",fontSize:12,margin:0}}>JPG, PNG, PDF — Máx. 10MB</p>
+              <input ref={fileRef} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])}/>
+            </div>
+            {ocrLoading&&<p style={{textAlign:"center",marginTop:12,color:"#555",fontSize:13}}>🔍 Analizando con IA...</p>}
+            {ocrInfo!==null&&!ocrLoading&&(
+              <div style={{marginTop:10,background:ocrInfo>0?"#0d1f0d":"#1f0d0d",border:`1px solid ${ocrInfo>0?"#1a3a1a":"#3a1a1a"}`,borderRadius:10,padding:"10px 14px",fontSize:13}}>
+                {ocrInfo>0?`✅ Potencia detectada: ${ocrInfo} W`:"❌ No se detectó potencia. Intenta manualmente."}
+              </div>
+            )}
+          </div>
+        )}
+
+        {sheetErr&&(
+          <div style={{background:"#1a1400",border:"1px solid #3a3000",borderRadius:10,padding:"9px 14px",fontSize:11,color:"#aa9000",marginBottom:16}}>
+            ⚠️ Usando datos de ejemplo. Publica tu Sheet como CSV: <strong>Archivo → Compartir → Publicar en la web → CSV</strong>
+          </div>
+        )}
+
+        {loading&&<Spinner/>}
+        {result&&!loading&&<Result eq={result}/>}
+
+        {!result&&!loading&&(
+          <div style={{marginTop:6}}>
+            <p style={{color:"#333",fontSize:10,letterSpacing:2,textTransform:"uppercase",marginBottom:12,textAlign:"center"}}>Ejemplos rápidos</p>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"}}>
+              {[300,800,1800,3600,7200].map(w=>(
+                <button key={w} onClick={()=>{setWatts(String(w));setMode("manual");search(w);}}
+                  style={{background:"#111",border:"1px solid #222",color:"#666",borderRadius:8,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:500}}>{w} W</button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
