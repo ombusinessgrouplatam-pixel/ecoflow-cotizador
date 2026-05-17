@@ -280,11 +280,7 @@ export default function Home() {
           </div>
         )}
 
-        {sheetErr&&(
-          <div style={{background:"#1a1400",border:"1px solid #3a3000",borderRadius:10,padding:"9px 14px",fontSize:11,color:"#aa9000",marginBottom:16}}>
-            Usando datos de ejemplo. Publica tu Sheet como CSV: <strong>Archivo - Compartir - Publicar en la web - CSV</strong>
-          </div>
-        )}
+
 
         {loading&&<Spinner/>}
         {result&&!loading&&<Result eq={result}/>}
